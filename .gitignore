@@ -1,0 +1,35 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+frontend/.env
+backend/.env
+
+# Node
+node_modules/
+dist/
+frontend/node_modules/
+frontend/dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+backend/.venv/
+
+# Local data output
+backend/data/uploads/*
+backend/data/processed/*
+!backend/data/uploads/.gitkeep
+!backend/data/processed/.gitkeep
+!backend/data/reference/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
