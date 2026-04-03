@@ -33,3 +33,7 @@ backend/data/processed/*
 
 # Logs
 *.log
+
+data/uploads/
+backend/data/uploads/
+backend/data/processed/
