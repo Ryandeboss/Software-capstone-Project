@@ -5,8 +5,6 @@ Celebrity-Based Face Recognition for Organizing Private Photo Collections
 
 ## User Interaction diagram:
 
-![Architecture Diagram](docs/architecture.png)
-
 <h2 align="center">Architecture Diagram</h2>
 
 <p align="center">
