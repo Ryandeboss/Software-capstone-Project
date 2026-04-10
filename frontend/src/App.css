@@ -339,6 +339,14 @@ input {
   word-break: break-word;
 }
 
+.result-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .face-count {
   padding: 6px 10px;
   border-radius: 999px;
@@ -347,6 +355,23 @@ input {
   font-size: 0.84rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.download-button {
+  border: 1px solid rgba(145, 163, 255, 0.35);
+  border-radius: 12px;
+  padding: 9px 14px;
+  background: rgba(91, 124, 255, 0.12);
+  color: #dfe8ff;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+
+.download-button:hover {
+  transform: translateY(-1px);
+  background: rgba(91, 124, 255, 0.2);
+  border-color: rgba(145, 163, 255, 0.6);
 }
 
 .result-meta p {
@@ -359,9 +384,68 @@ input {
   margin-top: 14px;
 }
 
+.preview-section {
+  margin-top: 16px;
+}
+
+.preview-section h4,
 .boxes-section h4 {
   margin: 0 0 10px;
   font-size: 0.95rem;
+}
+
+.image-preview-frame {
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.image-preview-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  line-height: 0;
+}
+
+.result-image {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 12px;
+}
+
+.face-overlay {
+  position: absolute;
+  border: 3px solid;
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.face-overlay.matched {
+  border-color: #40e39b;
+  box-shadow: 0 0 0 1px rgba(64, 227, 155, 0.22);
+}
+
+.face-overlay.unknown {
+  border-color: #ff9f5a;
+  box-shadow: 0 0 0 1px rgba(255, 159, 90, 0.22);
+}
+
+.face-label {
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  transform: translateY(-100%);
+  max-width: calc(100% + 4px);
+  padding: 6px 10px;
+  border-radius: 10px 10px 10px 0;
+  background: rgba(8, 13, 24, 0.92);
+  color: #f7fbff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .box-list {
@@ -397,5 +481,14 @@ input {
 
   .app-container {
     padding: 24px 14px 36px;
+  }
+
+  .result-card-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .result-card-actions {
+    justify-content: flex-start;
   }
 }

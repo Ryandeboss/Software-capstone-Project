@@ -1,6 +1,8 @@
 from pathlib import Path
+import logging
 import cv2
 
+logger = logging.getLogger(__name__)
 
 def detect_faces(image_path: str) -> list[dict]:
     image_file = Path(image_path)
@@ -12,6 +14,7 @@ def detect_faces(image_path: str) -> list[dict]:
     if image is None:
         raise ValueError(f"Could not read image: {image_path}")
 
+    logger.info("Detecting faces in %s with image shape %s", image_file, image.shape)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -33,4 +36,5 @@ def detect_faces(image_path: str) -> list[dict]:
             "height": int(h),
         })
 
+    logger.info("OpenCV Haar cascade detected %s face(s): %s", len(results), results)
     return results
