@@ -4,6 +4,8 @@ import logging
 
 from app.routes.health import router as health_router
 from app.routes.upload import router as upload_router
+from app.routes.feedback import router as feedback_router
+from app.routes.settings import router as settings_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +24,8 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(upload_router)
+app.include_router(settings_router)
+app.include_router(feedback_router)
 
 
 @app.get("/")

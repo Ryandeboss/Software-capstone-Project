@@ -10,8 +10,13 @@ type FaceBox = {
 };
 
 type RecognizedFace = {
+  match_id: string;
+  face_index: number;
   name: string;
   distance?: number | null;
+  threshold_used?: number | null;
+  feedback_enabled?: boolean;
+  recognition_status?: string;
 };
 
 type SelectedImage = {
@@ -22,6 +27,7 @@ type SelectedImage = {
 };
 
 type UploadResponse = {
+  upload_id: string;
   message: string;
   filename: string;
   local_path: string;
@@ -29,6 +35,7 @@ type UploadResponse = {
   faces_detected?: number;
   face_boxes?: FaceBox[];
   recognized_faces?: RecognizedFace[];
+  recognition_threshold?: number;
 };
 
 type DisplayResult = UploadResponse & {
@@ -37,7 +44,23 @@ type DisplayResult = UploadResponse & {
   imageHeight: number;
 };
 
+type RecognitionSettings = {
+  recognition_threshold: number;
+  min_threshold: number;
+  max_threshold: number;
+  default_threshold: number;
+};
+
+type FeedbackAction = "confirm" | "reject";
+type FeedbackStatus = "idle" | "submitting" | "confirmed" | "rejected" | "error";
+
+type FeedbackState = {
+  state: FeedbackStatus;
+  message: string;
+};
+
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const API_BASE_URL = "http://127.0.0.1:8000";
 
 function formatName(name: string | undefined) {
   if (!name || name === "unknown") return "Unknown";
@@ -45,6 +68,28 @@ function formatName(name: string | undefined) {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function formatMetric(value: number | null | undefined, digits = 3) {
+  if (value === null || value === undefined) return "N/A";
+  return value.toFixed(digits);
+}
+
+function describeRecognition(face: RecognizedFace | undefined) {
+  if (!face) return "No recognition data returned for this face.";
+  if (face.recognition_status === "embedding_unavailable") {
+    return "A face was detected, but the system could not generate an embedding for comparison.";
+  }
+  if (face.name === "unknown") {
+    return "No celebrity passed the current threshold for this face.";
+  }
+  if (face.distance === null || face.distance === undefined) {
+    return "A celebrity match was returned without a distance score.";
+  }
+  if (face.threshold_used === null || face.threshold_used === undefined) {
+    return "A celebrity match was returned.";
+  }
+  return `Matched because ${face.distance.toFixed(3)} is below the current threshold of ${face.threshold_used.toFixed(3)}.`;
 }
 
 function loadImageMetadata(file: File): Promise<SelectedImage> {
@@ -87,12 +132,62 @@ export default function App() {
   const [status, setStatus] = useState("Idle");
   const [results, setResults] = useState<DisplayResult[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [settings, setSettings] = useState<RecognitionSettings | null>(null);
+  const [thresholdDraft, setThresholdDraft] = useState("0.60");
+  const [settingsMessage, setSettingsMessage] = useState("Loading recognition settings...");
+  const [isSavingThreshold, setIsSavingThreshold] = useState(false);
+  const [feedbackByMatchId, setFeedbackByMatchId] = useState<Record<string, FeedbackState>>({});
 
   const totalFilesLabel = useMemo(() => {
     if (selectedFiles.length === 0) return "No files selected";
     if (selectedFiles.length === 1) return "1 file selected";
     return `${selectedFiles.length} files selected`;
   }, [selectedFiles]);
+
+  const parsedThresholdDraft = Number(thresholdDraft);
+  const thresholdSliderValue = settings
+    ? Number.isFinite(parsedThresholdDraft)
+      ? Math.min(
+          settings.max_threshold,
+          Math.max(settings.min_threshold, parsedThresholdDraft),
+        )
+      : settings.recognition_threshold
+    : 0.6;
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function fetchSettings() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/settings`);
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || "Could not load recognition settings.");
+        }
+
+        const data: RecognitionSettings = await response.json();
+        if (!isActive) return;
+
+        setSettings(data);
+        setThresholdDraft(data.recognition_threshold.toFixed(2));
+        setSettingsMessage("Threshold loaded. Lower values are stricter.");
+      } catch (error) {
+        if (!isActive) return;
+        console.error(error);
+        setSettingsMessage(
+          error instanceof Error
+            ? error.message
+            : "Could not load recognition settings.",
+        );
+      }
+    }
+
+    void fetchSettings();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -109,6 +204,7 @@ export default function App() {
     if (files.length === 0) {
       setSelectedFiles([]);
       setResults([]);
+      setFeedbackByMatchId({});
       setStatus("Idle");
       return;
     }
@@ -120,6 +216,7 @@ export default function App() {
     }
 
     setResults([]);
+    setFeedbackByMatchId({});
 
     const nextSelectedFiles = await Promise.all(validFiles.map(loadImageMetadata));
 
@@ -140,6 +237,7 @@ export default function App() {
     setIsUploading(true);
     setStatus("Uploading and processing...");
     setResults([]);
+    setFeedbackByMatchId({});
 
     try {
       const uploadResults: DisplayResult[] = [];
@@ -148,7 +246,7 @@ export default function App() {
         const formData = new FormData();
         formData.append("file", selectedFile.file);
 
-        const response = await fetch("http://127.0.0.1:8000/upload", {
+        const response = await fetch(`${API_BASE_URL}/upload`, {
           method: "POST",
           body: formData,
         });
@@ -183,7 +281,129 @@ export default function App() {
     });
     setSelectedFiles([]);
     setResults([]);
+    setFeedbackByMatchId({});
     setStatus("Idle");
+  }
+
+  function handleThresholdDraftChange(nextValue: string) {
+    setThresholdDraft(nextValue);
+    setSettingsMessage("Unsaved threshold change.");
+  }
+
+  function restoreDefaultThreshold() {
+    if (!settings) return;
+    setThresholdDraft(settings.default_threshold.toFixed(2));
+    setSettingsMessage("Default threshold loaded. Save to apply it.");
+  }
+
+  async function saveThreshold() {
+    if (!settings) {
+      setSettingsMessage("Recognition settings are still loading.");
+      return;
+    }
+
+    if (!Number.isFinite(parsedThresholdDraft)) {
+      setSettingsMessage("Enter a valid threshold value before saving.");
+      return;
+    }
+
+    if (
+      parsedThresholdDraft < settings.min_threshold ||
+      parsedThresholdDraft > settings.max_threshold
+    ) {
+      setSettingsMessage(
+        `Threshold must stay between ${settings.min_threshold.toFixed(2)} and ${settings.max_threshold.toFixed(2)}.`,
+      );
+      return;
+    }
+
+    setIsSavingThreshold(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/settings/recognition-threshold`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ threshold: parsedThresholdDraft }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Could not save the recognition threshold.");
+      }
+
+      const data: RecognitionSettings = await response.json();
+      setSettings(data);
+      setThresholdDraft(data.recognition_threshold.toFixed(2));
+      setSettingsMessage("Threshold saved. Future uploads will use the new value.");
+    } catch (error) {
+      console.error(error);
+      setSettingsMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not save the recognition threshold.",
+      );
+    } finally {
+      setIsSavingThreshold(false);
+    }
+  }
+
+  async function submitFeedback(
+    result: DisplayResult,
+    face: RecognizedFace,
+    action: FeedbackAction,
+  ) {
+    setFeedbackByMatchId((currentState) => ({
+      ...currentState,
+      [face.match_id]: {
+        state: "submitting",
+        message: action === "confirm" ? "Saving confirmation..." : "Saving rejection...",
+      },
+    }));
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/feedback/matches`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          upload_id: result.upload_id,
+          match_id: face.match_id,
+          face_index: face.face_index,
+          action,
+          predicted_name: face.name,
+          source_filename: result.filename,
+          local_path: result.local_path,
+          distance: face.distance ?? null,
+          threshold_used: face.threshold_used ?? null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Could not record feedback.");
+      }
+
+      const responseBody: { message?: string } = await response.json();
+      setFeedbackByMatchId((currentState) => ({
+        ...currentState,
+        [face.match_id]: {
+          state: action === "confirm" ? "confirmed" : "rejected",
+          message: responseBody.message ?? "Feedback recorded.",
+        },
+      }));
+    } catch (error) {
+      console.error(error);
+      setFeedbackByMatchId((currentState) => ({
+        ...currentState,
+        [face.match_id]: {
+          state: "error",
+          message: error instanceof Error ? error.message : "Could not record feedback.",
+        },
+      }));
+    }
   }
 
   async function handleDownloadResult(result: DisplayResult) {
@@ -244,7 +464,7 @@ export default function App() {
       setStatus(
         error instanceof Error
           ? error.message
-          : "Could not download the processed image."
+          : "Could not download the processed image.",
       );
     }
   }
@@ -275,77 +495,154 @@ export default function App() {
         </header>
 
         <section className="grid">
-          <div className="panel upload-panel">
-            <h2>Upload Images</h2>
-            <p className="panel-subtext">
-              Supported formats: JPG, PNG, WEBP
-            </p>
-
-            <label className="dropzone" htmlFor="file-input">
-              <div className="dropzone-icon">⬆</div>
-              <p className="dropzone-title">Choose image files</p>
-              <p className="dropzone-subtitle">
-                Select one or multiple files from your computer
+          <div className="control-stack">
+            <div className="panel upload-panel">
+              <h2>Upload Images</h2>
+              <p className="panel-subtext">
+                Supported formats: JPG, PNG, WEBP
               </p>
-              <input
-                id="file-input"
-                type="file"
-                multiple
-                accept=".jpg,.jpeg,.png,.webp"
-                onChange={handleFileChange}
-                className="hidden-input"
-              />
-            </label>
 
-            <div className="selection-summary">
-              <span>{totalFilesLabel}</span>
+              <label className="dropzone" htmlFor="file-input">
+                <div className="dropzone-icon">^</div>
+                <p className="dropzone-title">Choose image files</p>
+                <p className="dropzone-subtitle">
+                  Select one or multiple files from your computer
+                </p>
+                <input
+                  id="file-input"
+                  type="file"
+                  multiple
+                  accept=".jpg,.jpeg,.png,.webp"
+                  onChange={handleFileChange}
+                  className="hidden-input"
+                />
+              </label>
+
+              <div className="selection-summary">
+                <span>{totalFilesLabel}</span>
+              </div>
+
+              {selectedFiles.length > 0 && (
+                <ul className="file-list">
+                  {selectedFiles.map((selectedFile) => (
+                    <li
+                      key={`${selectedFile.file.name}-${selectedFile.file.size}`}
+                      className="file-item"
+                    >
+                      <span className="file-name">{selectedFile.file.name}</span>
+                      <span className="file-size">
+                        {(selectedFile.file.size / 1024).toFixed(1)} KB
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="button-row">
+                <button
+                  className="primary-button"
+                  onClick={handleUpload}
+                  disabled={isUploading}
+                >
+                  {isUploading ? "Uploading..." : "Upload Images"}
+                </button>
+
+                <button
+                  className="secondary-button"
+                  onClick={clearSelection}
+                  disabled={isUploading}
+                >
+                  Clear
+                </button>
+              </div>
             </div>
 
-            {selectedFiles.length > 0 && (
-              <ul className="file-list">
-                {selectedFiles.map((selectedFile) => (
-                  <li
-                    key={`${selectedFile.file.name}-${selectedFile.file.size}`}
-                    className="file-item"
-                  >
-                    <span className="file-name">{selectedFile.file.name}</span>
-                    <span className="file-size">
-                      {(selectedFile.file.size / 1024).toFixed(1)} KB
+            <div className="panel settings-panel">
+              <h2>Recognition Settings</h2>
+              <p className="panel-subtext">
+                Adjust the distance threshold used to accept or reject a celebrity match.
+                Lower values make the recognizer more strict.
+              </p>
+
+              {settings ? (
+                <div className="settings-form">
+                  <div className="threshold-summary">
+                    <div>
+                      <p className="settings-label">Current Threshold</p>
+                      <p className="threshold-value">{thresholdDraft}</p>
+                    </div>
+                    <span className="threshold-pill">
+                      Range {settings.min_threshold.toFixed(2)} to {settings.max_threshold.toFixed(2)}
                     </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+                  </div>
 
-            <div className="button-row">
-              <button
-                className="primary-button"
-                onClick={handleUpload}
-                disabled={isUploading}
-              >
-                {isUploading ? "Uploading..." : "Upload Images"}
-              </button>
+                  <label className="settings-field">
+                    <span>Slider</span>
+                    <input
+                      type="range"
+                      min={settings.min_threshold}
+                      max={settings.max_threshold}
+                      step="0.01"
+                      value={thresholdSliderValue}
+                      onChange={(event) => {
+                        handleThresholdDraftChange(event.target.value);
+                      }}
+                    />
+                  </label>
 
-              <button
-                className="secondary-button"
-                onClick={clearSelection}
-                disabled={isUploading}
-              >
-                Clear
-              </button>
+                  <label className="settings-field">
+                    <span>Numeric Input</span>
+                    <input
+                      type="number"
+                      min={settings.min_threshold}
+                      max={settings.max_threshold}
+                      step="0.01"
+                      value={thresholdDraft}
+                      onChange={(event) => {
+                        handleThresholdDraftChange(event.target.value);
+                      }}
+                      className="threshold-input"
+                    />
+                  </label>
+
+                  <div className="button-row settings-actions">
+                    <button
+                      className="primary-button"
+                      onClick={() => void saveThreshold()}
+                      disabled={isSavingThreshold}
+                    >
+                      {isSavingThreshold ? "Saving..." : "Save Threshold"}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={restoreDefaultThreshold}
+                      disabled={isSavingThreshold}
+                    >
+                      Use Default
+                    </button>
+                  </div>
+
+                  <p className="settings-note">{settingsMessage}</p>
+                </div>
+              ) : (
+                <div className="empty-state compact-empty-state">
+                  <p>Settings unavailable.</p>
+                  <span>{settingsMessage}</span>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="panel results-panel">
             <h2>Results</h2>
             <p className="panel-subtext">
-              Uploaded file details and face-detection output
+              Review face matches, confirm or reject the result, and inspect the threshold used.
             </p>
 
             {results.length === 0 ? (
               <div className="empty-state">
                 <p>No results yet.</p>
-                <span>Upload an image to see stored path, face count, and coordinates.</span>
+                <span>Upload an image to review detections, match scores, and feedback controls.</span>
               </div>
             ) : (
               <div className="results-list">
@@ -376,6 +673,9 @@ export default function App() {
                       </p>
                       <p>
                         <strong>Message:</strong> {result.message}
+                      </p>
+                      <p>
+                        <strong>Threshold Used:</strong> {formatMetric(result.recognition_threshold, 2)}
                       </p>
                     </div>
 
@@ -415,16 +715,76 @@ export default function App() {
                     <div className="boxes-section">
                       <h4>Detections</h4>
                       {result.face_boxes && result.face_boxes.length > 0 ? (
-                        <ul className="box-list">
-                          {result.face_boxes.map((box, i) => (
-                            <li key={i} className="box-item">
-                              <span>{formatName(result.recognized_faces?.[i]?.name)}</span>
-                              <span>x: {box.x}</span>
-                              <span>y: {box.y}</span>
-                              <span>w: {box.width}</span>
-                              <span>h: {box.height}</span>
-                            </li>
-                          ))}
+                        <ul className="match-list">
+                          {result.face_boxes.map((box, i) => {
+                            const recognizedFace = result.recognized_faces?.[i];
+                            const feedbackState = recognizedFace
+                              ? feedbackByMatchId[recognizedFace.match_id]
+                              : undefined;
+                            const isUnknown = recognizedFace?.name === "unknown" || !recognizedFace?.name;
+                            const isSubmitting = feedbackState?.state === "submitting";
+                            const isFinalized =
+                              feedbackState?.state === "confirmed" ||
+                              feedbackState?.state === "rejected";
+
+                            return (
+                              <li key={`${result.filename}-box-${i}`} className="match-card">
+                                <div className="match-card-header">
+                                  <span className={`match-pill ${isUnknown ? "unknown" : "matched"}`}>
+                                    {formatName(recognizedFace?.name)}
+                                  </span>
+                                  <span className="match-score">
+                                    Distance {formatMetric(recognizedFace?.distance)} / Threshold{" "}
+                                    {formatMetric(recognizedFace?.threshold_used)}
+                                  </span>
+                                </div>
+
+                                <p className="match-description">
+                                  {describeRecognition(recognizedFace)}
+                                </p>
+
+                                <div className="box-coordinates">
+                                  <span>x: {box.x}</span>
+                                  <span>y: {box.y}</span>
+                                  <span>w: {box.width}</span>
+                                  <span>h: {box.height}</span>
+                                </div>
+
+                                {recognizedFace?.feedback_enabled ? (
+                                  <div className="feedback-panel">
+                                    <p className="feedback-title">
+                                      {isUnknown ? "Is this result correct?" : "Is this celebrity match correct?"}
+                                    </p>
+                                    <div className="feedback-actions">
+                                      <button
+                                        type="button"
+                                        className="feedback-button confirm"
+                                        onClick={() => void submitFeedback(result, recognizedFace, "confirm")}
+                                        disabled={isSubmitting || isFinalized}
+                                      >
+                                        Confirm
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="feedback-button reject"
+                                        onClick={() => void submitFeedback(result, recognizedFace, "reject")}
+                                        disabled={isSubmitting || isFinalized}
+                                      >
+                                        Reject
+                                      </button>
+                                    </div>
+                                    <p className={`feedback-status ${feedbackState?.state ?? "idle"}`}>
+                                      {feedbackState?.message ?? "No feedback recorded yet."}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <p className="feedback-status unavailable">
+                                    Feedback is unavailable because the system could not generate a usable embedding for this face.
+                                  </p>
+                                )}
+                              </li>
+                            );
+                          })}
                         </ul>
                       ) : (
                         <p className="no-boxes">No faces detected.</p>

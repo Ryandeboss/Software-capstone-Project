@@ -11,6 +11,7 @@ from app.services.face_detection import detect_faces
 from app.services.face_embedding import generate_embedding
 from app.services.celebrity_loader import load_celebrity_embeddings
 from app.services.recognition import recognize_face
+from app.services.settings_service import get_recognition_settings
 
 
 router = APIRouter(prefix="/upload", tags=["upload"])
@@ -27,12 +28,15 @@ async def upload_image(file: UploadFile = File(...)):
     try:
         logger.info("Upload request received for file: %s", file.filename)
         celebrity_db = load_celebrity_embeddings()
+        recognition_settings = get_recognition_settings()
+        recognition_threshold = recognition_settings["recognition_threshold"]
         celebrity_count = len(celebrity_db)
         reference_embedding_count = sum(len(embeddings) for embeddings in celebrity_db.values())
         logger.info(
-            "Celebrity database ready: %s celebrities, %s embeddings",
+            "Celebrity database ready: %s celebrities, %s embeddings, threshold %.3f",
             celebrity_count,
             reference_embedding_count,
+            recognition_threshold,
         )
 
         original_name = file.filename or ""
@@ -51,6 +55,7 @@ async def upload_image(file: UploadFile = File(...)):
         if not contents:
             raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
+        upload_id = uuid4().hex
         file_path.write_bytes(contents)
         logger.info("Saved uploaded file to %s (%s bytes)", file_path, len(contents))
 
@@ -72,41 +77,65 @@ async def upload_image(file: UploadFile = File(...)):
 
         results = []
 
-        for index, box in enumerate(face_boxes, start=1):
+        for index, box in enumerate(face_boxes):
             x = box["x"]
             y = box["y"]
             width = box["width"]
             height = box["height"]
             known_face_location = [(y, x + width, y + height, x)]
+            match_id = uuid4().hex
 
             logger.info(
                 "Generating embedding for uploaded face %s using detected box %s",
-                index,
+                index + 1,
                 box,
             )
             embedding = generate_embedding(image, known_face_location)
 
             if embedding is None:
-                logger.warning("Uploaded face %s did not produce an embedding", index)
-                results.append({"name": "unknown"})
+                logger.warning("Uploaded face %s did not produce an embedding", index + 1)
+                results.append(
+                    {
+                        "match_id": match_id,
+                        "face_index": index,
+                        "name": "unknown",
+                        "distance": None,
+                        "threshold_used": recognition_threshold,
+                        "feedback_enabled": False,
+                        "recognition_status": "embedding_unavailable",
+                    }
+                )
                 continue
 
-            name, distance = recognize_face(embedding, celebrity_db)
-            logger.info("Uploaded face %s recognition result: name=%s distance=%s", index, name, distance)
+            name, distance = recognize_face(
+                embedding,
+                celebrity_db,
+                threshold=recognition_threshold,
+            )
+            logger.info("Uploaded face %s recognition result: name=%s distance=%s", index + 1, name, distance)
 
-            results.append({
-                "name": name,
-                "distance": float(distance) if distance is not None else None
-            })
+            results.append(
+                {
+                    "match_id": match_id,
+                    "face_index": index,
+                    "name": name,
+                    "distance": float(distance) if distance is not None else None,
+                    "threshold_used": recognition_threshold,
+                    "feedback_enabled": True,
+                    "recognition_status": "matched" if name != "unknown" else "threshold_rejected",
+                }
+            )
 
         logger.info("Upload processing complete for %s: %s", original_name, results)
         return {
+            "upload_id": upload_id,
             "message": "Upload successful. File stored locally and metadata inserted into Supabase.",
             "filename": original_name,
             "local_path": str(file_path),
             "faces_detected": faces_detected,
             "face_boxes": face_boxes,
             "db_result": getattr(db_result, "data", None),
+            "recognition_threshold": recognition_threshold,
             "recognized_faces": results
         }
 
