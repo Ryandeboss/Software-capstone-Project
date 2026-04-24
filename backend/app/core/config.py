@@ -13,6 +13,10 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET", "project-images")
 SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "processed_images")
+SUPABASE_CELEBRITY_EMBEDDINGS_TABLE = os.getenv(
+    "SUPABASE_CELEBRITY_EMBEDDINGS_TABLE",
+    "celebrity_embeddings",
+)
 
 if not SUPABASE_URL:
     raise ValueError(f"Missing SUPABASE_URL in {ENV_PATH}")
