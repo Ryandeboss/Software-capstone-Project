@@ -104,6 +104,32 @@ npm run dev
 
 Open the Vite URL, usually `http://localhost:5173`.
 
+## Website Walkthrough
+
+### Step 1: Choose Images
+
+When the website first loads, the upload panel is ready for image selection. Users can click the upload area to choose files from their computer.
+
+<p align="center">
+  <img src="docs/screenshots/walkthrough-step-1-select-images.png" width="850" alt="Initial upload screen with the choose image files area highlighted"/>
+</p>
+
+### Step 2: Review Selected Files
+
+After selecting images, the app shows how many files are ready, lists the selected file names, and gives the user two choices: upload the images or clear the selection.
+
+<p align="center">
+  <img src="docs/screenshots/walkthrough-step-2-ready-to-upload.png" width="850" alt="Selected file list with upload and clear buttons highlighted"/>
+</p>
+
+### Step 3: Review Recognition Results
+
+Once processing finishes, the results panel shows the detected face, the celebrity match the AI chose, the distance score, and the threshold used. Users can confirm or reject the match, download the result, and adjust the recognition threshold for future uploads.
+
+<p align="center">
+  <img src="docs/screenshots/walkthrough-step-3-results.png" width="850" alt="Completed recognition result with face box, match feedback controls, and threshold settings"/>
+</p>
+
 ## User Guide
 
 See [docs/user-guide.md](docs/user-guide.md) for the full guide.
